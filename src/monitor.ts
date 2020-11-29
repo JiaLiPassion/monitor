@@ -17,7 +17,14 @@ interface TaskFrameChildrenUpdate {
   taskFrame: TaskFrame;
 }
 
-interface ChangeDetectionInfo {}
+interface ChangeDetectionInfo {
+  taskFrame: TaskFrame;
+  duration: number;
+  templateDuration: {
+    component: any;
+    duration: number;
+  }[];
+}
 
 interface TaskFrame {
   parent?: TaskFrame;
@@ -38,7 +45,32 @@ const topTaskFrame: TaskFrame = {
   beginInvoke$: new Subject<TaskFrame>(),
   endInvoke$: new Subject<TaskFrame>(),
   childrenUpdated$: new Subject<TaskFrameChildrenUpdate>(),
+  changeDetectionInfos: [],
 };
+
+function printTick(tick: ChangeDetectionInfo) {
+  console.log(
+    `%cTicking cost ${tick.duration.toFixed(4)}ms because of:`,
+    'color: orange; font-size: large'
+  );
+  if (currentTaskFrame.changeDetectionInfos.length > 1) {
+    console.log(
+      '%cOne task causes multiple tickings, try ngZoneEventCoalescing?',
+      'color: red; font-size: large'
+    );
+  }
+  if (tick.taskFrame) {
+    printTaskFrame(tick.taskFrame);
+  }
+  tick.templateDuration.forEach((t) => {
+    console.log(
+      `%cComponent render ${
+        t.component?.constructor?.name
+      } cost ${t.duration.toFixed(4)} ms`,
+      'color: orange'
+    );
+  });
+}
 
 function printTaskFrame(taskFrame: TaskFrame) {
   if (taskFrame === topTaskFrame) {
@@ -70,6 +102,7 @@ function printTaskFrame(taskFrame: TaskFrame) {
 }
 
 let currentTaskFrame = topTaskFrame;
+let currentTick: ChangeDetectionInfo;
 let oldTaskFrame = null;
 const taskFrameChanged$ = new BehaviorSubject<TaskFrame>(currentTaskFrame);
 let ngZone: any;
@@ -103,6 +136,7 @@ const monitorZoneSpec: ZoneSpec = {
         : new Subject<TaskFrame>(),
       endInvoke$: new Subject<TaskFrame>(),
       childrenUpdated$: new Subject<TaskFrameChildrenUpdate>(),
+      changeDetectionInfos: [],
     };
     currentTaskFrame.children.push(taskFrame);
     currentTaskFrame.childrenUpdated$.next({
@@ -257,8 +291,73 @@ function endAllTask(taskEnd$: Observable<TaskFrame>): Observable<TaskFrame> {
 }
 
 declare let ng: any;
-function patchComponent(injector: Injector, rootElement: Element) {
-  const rootComponents = ng.getRootComponents(rootElement);
+function patchComponent(tView, lView, component: any) {
+  const templateFn = tView.template;
+  const preOrderCheckHooks = tView.preOrderCheckHooks;
+  const contentCheckHooks = tView.contentCheckHooks;
+  const viewCheckHooks = tView.viewCheckHooks;
+  if (viewCheckHooks) {
+    // TODO: hard coding here for demo
+    for (let i = 0; i < viewCheckHooks.length; i++) {
+      const hook = viewCheckHooks[i];
+      if (typeof hook !== 'function') {
+        continue;
+      }
+      viewCheckHooks[i] = function (this: unknown) {
+        const comp = this;
+        const keys = Object.keys(comp);
+        const beforeValues: any = {};
+        keys.forEach((key) => {
+          if (typeof comp[key] !== 'function') {
+            beforeValues[key] = comp[key];
+          }
+        });
+        const r = hook.apply(comp, arguments);
+        keys.forEach((key) => {
+          if (typeof comp[key] !== 'function') {
+            const beforeValue = beforeValues[key];
+            const afterValue = comp[key];
+            if (afterValue !== beforeValue) {
+              console.log(
+                `%cValue is updated in the ${component.constructor?.name} ${hook.name} from '${beforeValue}' to '${afterValue}'`,
+                'color: red; font-size: large'
+              );
+            }
+          }
+        });
+        return r;
+      };
+    }
+  }
+  const components = tView.components;
+  if (templateFn && !templateFn['__monitor_unpatched__']) {
+    tView.template = function (this: unknown) {
+      const start = performance.now();
+      const r = templateFn.apply(this, arguments);
+      const duration = performance.now() - start;
+      if (currentTick) {
+        currentTick.templateDuration.push({
+          component,
+          duration,
+        });
+      }
+      return r;
+    };
+    tView.template['__monitor_unpatched__'] = templateFn;
+  }
+  if (!components) {
+    return;
+  }
+  components.forEach((c) => {
+    const slot = lView[c];
+    let cLView;
+    if (Array.isArray(slot) && typeof slot[1] === 'object') {
+      cLView = slot;
+    } else {
+      cLView = slot[0];
+    }
+    patchComponent(cLView[1], cLView, cLView[8]);
+  });
 }
 
 function patchEventListener(task: Task) {
@@ -286,8 +385,12 @@ function printTaskFrameLogAndCleanup(taskFrame: TaskFrame) {
   if (!taskFrame.task) {
     console.log(
       'cost time: ',
-      (taskFrame.taskInfo.performanceChildrenEnd ||
-        taskFrame.taskInfo.performanceEnd) - taskFrame.taskInfo.performanceStart
+      (
+        (taskFrame.taskInfo.performanceChildrenEnd ||
+          taskFrame.taskInfo.performanceEnd) -
+        taskFrame.taskInfo.performanceStart
+      ).toFixed(4),
+      'ms'
     );
     console.log('zone run are done');
     return;
@@ -300,8 +403,11 @@ function printTaskFrameLogAndCleanup(taskFrame: TaskFrame) {
   );
   console.log(
     'cost time: ',
-    (taskFrame.taskInfo.performanceChildrenEnd ||
-      taskFrame.taskInfo.performanceEnd) - taskFrame.taskInfo.performanceStart
+    (
+      (taskFrame.taskInfo.performanceChildrenEnd ||
+        taskFrame.taskInfo.performanceEnd) - taskFrame.taskInfo.performanceStart
+    ).toFixed(4),
+    'ms'
   );
   taskFrame.children.forEach((c) => {
     printTaskFrameLogAndCleanup(c);
@@ -332,22 +438,44 @@ export function initMonitorZone(
     callback()
       .then((ngModuleRef) => {
         const appRef = ngModuleRef.injector.get(ApplicationRef);
-        patchComponent(ngModuleRef.injector, rootElement);
-        const tick$ = new BehaviorSubject<any>(null);
+        const rootComponents = ng && ng.getRootComponents(rootElement);
+        rootComponents.forEach((r) => {
+          const lView = r['__ngContext__'];
+          const tView = lView[1];
+          patchComponent(tView, lView, r);
+        });
+        const tick$ = new Subject<any>();
         const tick = appRef.tick;
         ngZone = (appRef as any)._zone;
         appRef.tick = function (this: unknown) {
-          tick$.next(null);
-          return tick.apply(this, arguments);
+          const start = performance.now();
+          currentTick = {
+            taskFrame: currentTaskFrame,
+            duration: 0,
+            templateDuration: [],
+          };
+          let r = null;
+          try {
+            r = tick.apply(this, arguments);
+          } catch (err) {
+            console.error(err);
+          }
+          const end = performance.now();
+          currentTick.duration = end - start;
+          tick$.next(currentTick);
+          // TODO: try to patch embemded view later
+          // rootComponents.forEach((r) => {
+          //   const lView = r['__ngContext__'];
+          //   const tView = lView[1];
+          //   patchComponent(tView, lView, r);
+          // });
+          return r;
         };
         tick$
           .pipe(
-            tap((_) => {
-              console.log(
-                '%cIs about to ticking because of:',
-                'color: orange; font-size: large'
-              );
-              printTaskFrame(currentTaskFrame);
+            tap((currentTick) => {
+              currentTaskFrame.changeDetectionInfos.push(currentTick);
+              printTick(currentTick);
               if (oldTaskFrame) {
                 currentTaskFrame = oldTaskFrame;
               }

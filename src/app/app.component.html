@@ -1,9 +1,26 @@
 {{title}}
 
 <button (click)="onClick()">Click</button>
+<button (click)="push()">push</button>
 <!-- <div *ngIf="data$ | async as data">
   {{data | json}}
 </div> -->
 <div>
   {{data | json}}
 </div>
+<app-hello [hello]="hello"></app-hello>
+<br />
+<app-onpush [hello]="pushHello"></app-onpush>
+
+<br />
+<div (click)="parentClick()">
+  parent div
+  <button (click)="childClick()">Child click</button>
+</div>
+
+<br />
+<button (click)="ecHello = 'updated'">show expression changed error component</button>
+<!-- <div *ngIf="showEC">
+  <app-ec [hello]="ecHello"></app-ec>
+</div> -->
+<app-ec [hello]="ecHello"></app-ec>

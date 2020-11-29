@@ -9,6 +9,10 @@ import { Observable } from 'rxjs';
 })
 export class AppComponent {
   title = 'monitor';
+  hello = 'hello';
+  pushHello = 'push';
+  ecHello = '';
+  showEC = false;
   // data$: Observable<any>;
   data: any;
 
@@ -24,5 +28,17 @@ export class AppComponent {
         .get('https://jsonplaceholder.typicode.com/users/1')
         .subscribe((data) => (this.data = data));
     });
+  }
+
+  push() {
+    this.pushHello = 'updated';
+  }
+
+  parentClick() {
+    console.log('parent clicked');
+  }
+
+  childClick() {
+    console.log('child clicked');
   }
 }
