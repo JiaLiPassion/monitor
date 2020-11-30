@@ -5,10 +5,21 @@
     body {
       font-family: "Lucida Console", Courier, monospace;
     }
-    .tick {
-      font-size: large;
-      color: orange;
+
+    .fixedWrapper {
+      height: 100;
     }
+
+    .fixedElement {
+      background-color: #c0c0c0;
+      position: fixed;
+      top: 0;
+      width: 100%;
+      z-index: 100;
+    }
+
+
+    .tick {}
 
     .duration {
       font-size: large;
@@ -26,7 +37,7 @@
     }
 
     ol.compduration {
-      list-style-type:decimal;
+      list-style-type: decimal;
       list-style-position: inside;
       display: list-item;
     }
@@ -112,20 +123,28 @@
         let id = setInterval(() => {
           components.forEach(c => c.classList.remove('highlight'));
           if (idx === components.length) {
+            for (let i = 0; i < rows.length; i++) {
+              const row = rows[i];
+              const v = data.getValue(i, 0);
+              data.setCell(i, 0, v, v);
+            }
+            chart.draw(data, { 'allowHtml': true });
             clearInterval(id);
             return;
           }
           const comp = components[idx++];
           const templateData = comp.templateData;
           comp.classList.add('highlight');
-          for (let i = 0; i < rows.length; i ++) {
+          for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            const d = row[0];
-            if (row[0].v === templateData.name) {
-              row[0].f = `div style="color:red; font-style:italic">${templateData.name}</div>`;
+            let style = null;
+            const v = data.getValue(i, 0);
+            if (row[0].f === templateData.name) {
+              style = `<div style="color:red; font-style:italic">${v}</div>`;
             } else {
-              row[0].f = templateData.name;
+              style = v;
             }
+            data.setCell(i, 0, v, style);
           }
           chart.draw(data, { 'allowHtml': true });
         }, 500);
@@ -226,9 +245,11 @@
 </head>
 
 <body>
-  <div id="chart_div"></div>
+  <div class="fixedWrapper">
+    <div id="chart_div" class="fixedElement"></div>
+  </div>
   <!-- <button id="btn">update</button> -->
-  <div id="tick"></div>
+  <div id="tick" class="tick"></div>
   <div id="task"></div>
 </body>
 

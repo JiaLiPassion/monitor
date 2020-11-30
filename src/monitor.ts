@@ -1,9 +1,9 @@
 // tslint:disable-next-line:no-reference
 /// <reference path="../node_modules/zone.js/zone.d.ts"/>
 
-import {ApplicationRef, NgModuleRef} from '@angular/core';
-import {BehaviorSubject, combineLatest, Observable, of, Subject} from 'rxjs';
-import {filter, mergeMap, switchMap, tap} from 'rxjs/operators';
+import { ApplicationRef, NgModuleRef } from '@angular/core';
+import { BehaviorSubject, combineLatest, Observable, of, Subject } from 'rxjs';
+import { filter, mergeMap, switchMap, tap } from 'rxjs/operators';
 
 interface TaskInfo {
   performanceStart?: number;
@@ -13,14 +13,14 @@ interface TaskInfo {
 }
 
 interface TaskFrameChildrenUpdate {
-  type: 'scheduled'|'cancelled'|'begin'|'end';
+  type: 'scheduled' | 'cancelled' | 'begin' | 'end';
   taskFrame: TaskFrame;
 }
 
 interface ChangeDetectionInfo {
   taskFrame: TaskFrame;
   duration: number;
-  templateDuration: {component: any; duration: number;}[];
+  templateDuration: { component: any; duration: number }[];
 }
 
 interface TaskFrame {
@@ -49,20 +49,20 @@ function printTick(tick: ChangeDetectionInfo) {
   const tickTraceLog: any = {};
   tickTraceLog.duration = tick.duration;
   tickTraceLog.isMultipleTick =
-      currentTaskFrame.changeDetectionInfos.length > 1;
-  tickTraceLog.templateDuration =
-      tick.templateDuration.map((t) => ({
-                                  name: t.component ?.constructor.name || '',
-                                  duration :
-                                  t.duration,
-                                }));
+    currentTaskFrame.changeDetectionInfos.length > 1;
+  tickTraceLog.templateDuration = tick.templateDuration.map((t) => ({
+    name: t.component?.constructor.name || '',
+    duration: t.duration,
+  }));
   console.log(
-      `%cTicking cost ${tick.duration.toFixed(4)}ms because of:`,
-      'color: orange; font-size: large');
+    `%cTicking cost ${tick.duration.toFixed(4)}ms because of:`,
+    'color: orange; font-size: large'
+  );
   if (currentTaskFrame.changeDetectionInfos.length > 1) {
     console.log(
-        '%cOne task causes multiple tickings, try ngZoneEventCoalescing?',
-        'color: red; font-size: large');
+      '%cOne task causes multiple tickings, try ngZoneEventCoalescing?',
+      'color: red; font-size: large'
+    );
   }
   if (tick.taskFrame) {
     printTaskFrame(tick.taskFrame, tickTraceLog);
@@ -91,10 +91,11 @@ function printTaskFrame(taskFrame: TaskFrame, tickTraceLog: any) {
   while (tf) {
     if (tf.task) {
       const callbackName =
-          (tf.task.callback as any).displayName || tf.task.callback.name || '';
-      const xhrInfo = tf.task.source === 'XMLHttpRequest.send' ?
-          (tf.task.data as any).url :
-          null;
+        (tf.task.callback as any).displayName || tf.task.callback.name || '';
+      const xhrInfo =
+        tf.task.source === 'XMLHttpRequest.send'
+          ? (tf.task.data as any).url
+          : null;
       const taskInfo = xhrInfo || callbackName;
       logs.unshift(`task: ${tf.task.type}, ${tf.task.source}, ${taskInfo}`);
       tfLog.type = tf.task.type;
@@ -137,84 +138,108 @@ const monitorZoneSpec: ZoneSpec = {
       currentTask: null,
     },
   },
-  onScheduleTask:
-      (delegate: ZoneDelegate, curr: Zone, target: Zone, task: Task) => {
-        patchEventListener(task);
-        const isXHR = task.source === 'XMLHttpRequest.send';
-        const taskFrame = {
-          parent: currentTaskFrame,
-          children: [],
-          task,
-          beginInvoke$: isXHR ? new BehaviorSubject<TaskFrame>(this) :
-                                new Subject<TaskFrame>(),
-          endInvoke$: new Subject<TaskFrame>(),
-          childrenUpdated$: new Subject<TaskFrameChildrenUpdate>(),
-          changeDetectionInfos: [],
-        };
-        currentTaskFrame.children.push(taskFrame);
-        currentTaskFrame.childrenUpdated$.next({
-          type: 'scheduled',
-          taskFrame,
-        });
-        (task as any).taskFrame = taskFrame;
-        if (task.source === 'XMLHttpRequest.send') {
-          taskFrame.beginInvoke$.next(taskFrame);
-        }
-        return delegate.scheduleTask(target, task);
-      },
-  onCancelTask:
-      (delegate: ZoneDelegate, curr: Zone, target: Zone, task: Task) => {
-        const taskFrame = (task as any).taskFrame as TaskFrame;
-        if (taskFrame) {
-          taskFrame.cancelled = true;
-        }
+  onScheduleTask: (
+    delegate: ZoneDelegate,
+    curr: Zone,
+    target: Zone,
+    task: Task
+  ) => {
+    patchEventListener(task);
+    const isXHR = task.source === 'XMLHttpRequest.send';
+    const taskFrame = {
+      parent: currentTaskFrame,
+      children: [],
+      task,
+      beginInvoke$: isXHR
+        ? new BehaviorSubject<TaskFrame>(this)
+        : new Subject<TaskFrame>(),
+      endInvoke$: new Subject<TaskFrame>(),
+      childrenUpdated$: new Subject<TaskFrameChildrenUpdate>(),
+      changeDetectionInfos: [],
+    };
+    currentTaskFrame.children.push(taskFrame);
+    currentTaskFrame.childrenUpdated$.next({
+      type: 'scheduled',
+      taskFrame,
+    });
+    (task as any).taskFrame = taskFrame;
+    if (task.source === 'XMLHttpRequest.send') {
+      taskFrame.beginInvoke$.next(taskFrame);
+    }
+    return delegate.scheduleTask(target, task);
+  },
+  onCancelTask: (
+    delegate: ZoneDelegate,
+    curr: Zone,
+    target: Zone,
+    task: Task
+  ) => {
+    const taskFrame = (task as any).taskFrame as TaskFrame;
+    if (taskFrame) {
+      taskFrame.cancelled = true;
+    }
+    taskFrame.parent.childrenUpdated$.next({
+      type: 'cancelled',
+      taskFrame,
+    });
+    return delegate.cancelTask(target, task);
+  },
+  onInvokeTask: (
+    delegate: ZoneDelegate,
+    curr: Zone,
+    target: Zone,
+    task: Task,
+    applyThis: any,
+    applyArgs: any[]
+  ) => {
+    oldTaskFrame = currentTaskFrame;
+    let taskFrame: TaskFrame;
+    try {
+      taskFrame = (task as any).taskFrame as TaskFrame;
+      currentTaskFrame = taskFrame;
+      if (task.type === 'eventTask') {
+        taskFrameChanged$.next(currentTaskFrame);
+      }
+      if (task.source !== 'XMLHttpRequest.send') {
+        taskFrame.beginInvoke$.next(taskFrame);
+      }
+      currentTaskFrame.parent.childrenUpdated$.next({
+        type: 'begin',
+        taskFrame,
+      });
+      setCurrentTask(task);
+      return delegate.invokeTask(target, task, applyThis, applyArgs);
+    } finally {
+      setCurrentTask(null);
+      if (
+        ngZone &&
+        ngZone._nesting - 1 == 0 &&
+        !ngZone.hasPendingMicrotasks &&
+        !ngZone.isStable
+      ) {
+      } else {
+        currentTaskFrame = oldTaskFrame;
+      }
+      // taskFrameChanged$.next(currentTaskFrame);
+      taskFrame.endInvoke$.next(taskFrame);
+      if (taskFrame) {
+        taskFrame.invoked = true;
         taskFrame.parent.childrenUpdated$.next({
-          type: 'cancelled',
+          type: 'end',
           taskFrame,
         });
-        return delegate.cancelTask(target, task);
-      },
-  onInvokeTask:
-      (delegate: ZoneDelegate, curr: Zone, target: Zone, task: Task,
-       applyThis: any, applyArgs: any[]) => {
-        oldTaskFrame = currentTaskFrame;
-        let taskFrame: TaskFrame;
-        try {
-          taskFrame = (task as any).taskFrame as TaskFrame;
-          currentTaskFrame = taskFrame;
-          if (task.type === 'eventTask') {
-            taskFrameChanged$.next(currentTaskFrame);
-          }
-          if (task.source !== 'XMLHttpRequest.send') {
-            taskFrame.beginInvoke$.next(taskFrame);
-          }
-          currentTaskFrame.parent.childrenUpdated$.next({
-            type: 'begin',
-            taskFrame,
-          });
-          setCurrentTask(task);
-          return delegate.invokeTask(target, task, applyThis, applyArgs);
-        } finally {
-          setCurrentTask(null);
-          if (ngZone && ngZone._nesting - 1 == 0 &&
-              !ngZone.hasPendingMicrotasks && !ngZone.isStable) {
-          } else {
-            currentTaskFrame = oldTaskFrame;
-          }
-          // taskFrameChanged$.next(currentTaskFrame);
-          taskFrame.endInvoke$.next(taskFrame);
-          if (taskFrame) {
-            taskFrame.invoked = true;
-            taskFrame.parent.childrenUpdated$.next({
-              type: 'end',
-              taskFrame,
-            });
-          }
-        }
-      },
+      }
+    }
+  },
   onInvoke: (
-      delegate: ZoneDelegate, curr: Zone, target: Zone, callback: Function,
-      applyThis: any, applyArgs: any[], source: string) => {
+    delegate: ZoneDelegate,
+    curr: Zone,
+    target: Zone,
+    callback: Function,
+    applyThis: any,
+    applyArgs: any[],
+    source: string
+  ) => {
     if (currentTaskFrame === topTaskFrame) {
       currentTaskFrame.beginInvoke$.next(currentTaskFrame);
     }
@@ -237,47 +262,55 @@ function buildTask$(taskFrame: TaskFrame): Observable<TaskFrame> {
 }
 
 function beginTask(taskFrame: TaskFrame) {
-  return taskFrame.beginInvoke$.pipe(tap((_) => {
-    taskFrame.taskInfo = taskFrame.taskInfo || {};
-    taskFrame.taskInfo.performanceStart = performance.now();
-  }));
+  return taskFrame.beginInvoke$.pipe(
+    tap((_) => {
+      taskFrame.taskInfo = taskFrame.taskInfo || {};
+      taskFrame.taskInfo.performanceStart = performance.now();
+    })
+  );
 }
 
 function endTask(taskBegin$: Observable<TaskFrame>) {
   return taskBegin$.pipe(
-      switchMap((taskFrame) => taskFrame.endInvoke$.pipe(tap((_) => {
-        taskFrame.taskInfo.performanceEnd = performance.now();
-      }))));
+    switchMap((taskFrame) =>
+      taskFrame.endInvoke$.pipe(
+        tap((_) => {
+          taskFrame.taskInfo.performanceEnd = performance.now();
+        })
+      )
+    )
+  );
 }
 
 function endAllTask(taskEnd$: Observable<TaskFrame>): Observable<TaskFrame> {
-  return taskEnd$.pipe(switchMap((taskFrame) => {
-    if (taskFrame.children.length === 0) {
-      return of(taskFrame);
-    }
-    return combineLatest(taskFrame.children
-                             .filter(
-                                 (childTaskFrame) =>
-                                     childTaskFrame.task.type !== 'eventTask' &&
-                                     !childTaskFrame.invoked &&
-                                     !childTaskFrame.cancelled)
-                             .map((childTaskFrame) => {
-                               return buildTask$(childTaskFrame);
-                             }))
-        .pipe(switchMap((_) => {
+  return taskEnd$.pipe(
+    switchMap((taskFrame) => {
+      if (taskFrame.children.length === 0) {
+        return of(taskFrame);
+      }
+      return combineLatest(
+        taskFrame.children
+          .filter(
+            (childTaskFrame) =>
+              childTaskFrame.task.type !== 'eventTask' &&
+              !childTaskFrame.invoked &&
+              !childTaskFrame.cancelled
+          )
+          .map((childTaskFrame) => {
+            return buildTask$(childTaskFrame);
+          })
+      ).pipe(
+        switchMap((_) => {
           taskFrame.taskInfo.performanceChildrenEnd = performance.now();
           return of(taskFrame);
-        }));
-  }));
+        })
+      );
+    })
+  );
 }
 
 declare let ng: any;
 function patchComponent(tView, lView, component: any, compNode: any) {
-  const node = {
-    text: component.constructor.name,
-    children: [],
-  };
-  compNode.children.push(node);
   const templateFn = tView.template;
   const preOrderCheckHooks = tView.preOrderCheckHooks;
   const contentCheckHooks = tView.contentCheckHooks;
@@ -289,7 +322,7 @@ function patchComponent(tView, lView, component: any, compNode: any) {
       if (typeof hook !== 'function') {
         continue;
       }
-      viewCheckHooks[i] = function(this: unknown) {
+      viewCheckHooks[i] = function (this: unknown) {
         const comp = this;
         const keys = Object.keys(comp);
         const beforeValues: any = {};
@@ -317,7 +350,7 @@ function patchComponent(tView, lView, component: any, compNode: any) {
   }
   const components = tView.components;
   if (templateFn && !templateFn['__monitor_unpatched__']) {
-    tView.template = function(this: unknown) {
+    tView.template = function (this: unknown) {
       const start = performance.now();
       const r = templateFn.apply(this, arguments);
       const duration = performance.now() - start;
@@ -342,6 +375,11 @@ function patchComponent(tView, lView, component: any, compNode: any) {
     } else {
       cLView = slot[0];
     }
+    const node = {
+      text: cLView[8].constructor.name,
+      children: [],
+    };
+    compNode.children.push(node);
     patchComponent(cLView[1], cLView, cLView[8], node);
   });
 }
@@ -370,35 +408,40 @@ function printTaskFrameLogAndCleanup(taskFrame: TaskFrame, node: any) {
   }
   if (!taskFrame.task) {
     console.log(
-        'cost time: ',
-        ((taskFrame.taskInfo.performanceChildrenEnd ||
+      'cost time: ',
+      (
+        (taskFrame.taskInfo.performanceChildrenEnd ||
           taskFrame.taskInfo.performanceEnd) -
-         taskFrame.taskInfo.performanceStart)
-            .toFixed(4),
-        'ms');
+        taskFrame.taskInfo.performanceStart
+      ).toFixed(4),
+      'ms'
+    );
     console.log('zone run are done');
     return;
   }
-  node.duration = ((taskFrame.taskInfo.performanceChildrenEnd ||
-                    taskFrame.taskInfo.performanceEnd) -
-                   taskFrame.taskInfo.performanceStart)
-                      .toFixed(4);
+  node.duration = (
+    (taskFrame.taskInfo.performanceChildrenEnd ||
+      taskFrame.taskInfo.performanceEnd) - taskFrame.taskInfo.performanceStart
+  ).toFixed(4);
   console.group();
   console.log(
-      'all children tasks are done', taskFrame.task.type,
-      taskFrame.task.source);
+    'all children tasks are done',
+    taskFrame.task.type,
+    taskFrame.task.source
+  );
 
   node.type = taskFrame.task.type;
   node.source = taskFrame.task.source;
   node.children = [];
 
   console.log(
-      'cost time: ',
-      ((taskFrame.taskInfo.performanceChildrenEnd ||
-        taskFrame.taskInfo.performanceEnd) -
-       taskFrame.taskInfo.performanceStart)
-          .toFixed(4),
-      'ms');
+    'cost time: ',
+    (
+      (taskFrame.taskInfo.performanceChildrenEnd ||
+        taskFrame.taskInfo.performanceEnd) - taskFrame.taskInfo.performanceStart
+    ).toFixed(4),
+    'ms'
+  );
   taskFrame.children.forEach((c) => {
     const cNode: any = {};
     node.children.push(cNode);
@@ -410,83 +453,98 @@ function printTaskFrameLogAndCleanup(taskFrame: TaskFrame, node: any) {
 }
 
 export function initMonitorZone(
-    callback: () => Promise<NgModuleRef<any>>, rootElement: Element) {
+  callback: () => Promise<NgModuleRef<any>>,
+  rootElement: Element
+) {
   taskFrameChanged$
-      .pipe(filter((taskFrame) => !taskFrame.isBuilt), mergeMap((taskFrame) => {
-              const taskAllEnd$ = buildTask$(taskFrame);
-              return taskAllEnd$.pipe(tap((_) => {
-                const rootNode: any = {};
-                printTaskFrameLogAndCleanup(taskFrame, rootNode);
-                if ((window as any).tracePopup) {
-                  (window as any)
-                      .tracePopup.updateTaskData(JSON.stringify(rootNode));
-                }
-              }));
-            }))
-      .subscribe();
+    .pipe(
+      filter((taskFrame) => !taskFrame.isBuilt),
+      mergeMap((taskFrame) => {
+        const taskAllEnd$ = buildTask$(taskFrame);
+        return taskAllEnd$.pipe(
+          tap((_) => {
+            const rootNode: any = {};
+            printTaskFrameLogAndCleanup(taskFrame, rootNode);
+            if ((window as any).tracePopup) {
+              (window as any).tracePopup.updateTaskData(
+                JSON.stringify(rootNode)
+              );
+            }
+          })
+        );
+      })
+    )
+    .subscribe();
   Zone.current.fork(monitorZoneSpec).run(() => {
     callback()
-        .then((ngModuleRef) => {
-          const appRef = ngModuleRef.injector.get(ApplicationRef);
-          const rootComponents = ng && ng.getRootComponents(rootElement);
-          let rootNode;
-          rootComponents.forEach((r) => {
-            const lView = r['__ngContext__'];
-            const tView = lView[1];
-            rootNode = {
-              text: r.constructor.name,
-              children: [],
-            };
-            patchComponent(tView, lView, r, rootNode);
-          });
-          // send data to trace popup
-          if ((window as any).tracePopup) {
-            (window as any).tracePopup.updateCompTree(JSON.stringify(rootNode));
-          } else {
-            try {
-              (window as any).traceCompData = JSON.stringify(rootNode);
-            } catch (err) {
-              console.error(err);
-            }
-          }
-
-          const tick$ = new Subject<any>();
-          const tick = appRef.tick;
-          ngZone = (appRef as any)._zone;
-          appRef.tick = function(this: unknown) {
-            const start = performance.now();
-            currentTick = {
-              taskFrame: currentTaskFrame,
-              duration: 0,
-              templateDuration: [],
-            };
-            let r = null;
-            try {
-              r = tick.apply(this, arguments);
-            } catch (err) {
-              console.error(err);
-            }
-            const end = performance.now();
-            currentTick.duration = end - start;
-            tick$.next(currentTick);
-            // TODO: try to patch embemded view later
-            // rootComponents.forEach((r) => {
-            //   const lView = r['__ngContext__'];
-            //   const tView = lView[1];
-            //   patchComponent(tView, lView, r);
-            // });
-            return r;
+      .then((ngModuleRef) => {
+        const appRef = ngModuleRef.injector.get(ApplicationRef);
+        const rootComponents = ng && ng.getRootComponents(rootElement);
+        let rootNode;
+        rootComponents.forEach((r) => {
+          const lView = r['__ngContext__'];
+          const tView = lView[1];
+          rootNode = {
+            text: r.constructor.name,
+            children: [],
           };
-          tick$
-              .pipe(tap((currentTick) => {
-                currentTaskFrame.changeDetectionInfos.push(currentTick);
-                printTick(currentTick);
-                if (oldTaskFrame) {
-                  currentTaskFrame = oldTaskFrame;
-                }
-              }))
-              .subscribe();
-        })
-        .catch((err) => console.log);
+          patchComponent(tView, lView, r, rootNode);
+        });
+
+        const rootCompNode =
+          rootNode.children.length > 0 ? rootNode.children[0] : rootNode;
+        // send data to trace popup
+        if ((window as any).tracePopup) {
+          (window as any).tracePopup.updateCompTree(
+            JSON.stringify(rootCompNode)
+          );
+        } else {
+          try {
+            (window as any).traceCompData = JSON.stringify(rootCompNode);
+          } catch (err) {
+            console.error(err);
+          }
+        }
+
+        const tick$ = new Subject<any>();
+        const tick = appRef.tick;
+        ngZone = (appRef as any)._zone;
+        appRef.tick = function (this: unknown) {
+          const start = performance.now();
+          currentTick = {
+            taskFrame: currentTaskFrame,
+            duration: 0,
+            templateDuration: [],
+          };
+          let r = null;
+          try {
+            r = tick.apply(this, arguments);
+          } catch (err) {
+            console.error(err);
+          }
+          const end = performance.now();
+          currentTick.duration = end - start;
+          tick$.next(currentTick);
+          // TODO: try to patch embemded view later
+          // rootComponents.forEach((r) => {
+          //   const lView = r['__ngContext__'];
+          //   const tView = lView[1];
+          //   patchComponent(tView, lView, r);
+          // });
+          return r;
+        };
+        tick$
+          .pipe(
+            tap((currentTick) => {
+              currentTaskFrame.changeDetectionInfos.push(currentTick);
+              printTick(currentTick);
+              if (oldTaskFrame) {
+                currentTaskFrame = oldTaskFrame;
+              }
+            })
+          )
+          .subscribe();
+      })
+      .catch((err) => console.log);
   });
 }
