@@ -18,6 +18,8 @@ export class AppComponent {
 
   constructor(private httpClient: HttpClient) {}
 
+  simpleClick() {}
+
   onClick() {
     setTimeout(() => {
       this.title = 'new title';

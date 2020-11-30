@@ -176,7 +176,7 @@
         return;
       }
       const taskTitleUL = buildUL(taskDiv, '');
-      const taskTitleLI = buildLI(taskTitleUL, 'Task with children finished.');
+      const taskTitleLI = buildLI(taskTitleUL, 'Task finished.');
       let elem = taskTitleLI;
       function buildTaskFrameDiv(log) {
         const tickTaskElem = buildUL(elem, log.type ? `-> task: ${log.type} ${log.source} cost ${log.duration}ms` : '', 'task');
