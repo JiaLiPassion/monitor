@@ -2,15 +2,52 @@
 
 <head>
   <style>
+    body {
+      font-family: "Lucida Console", Courier, monospace;
+    }
     .tick {
       font-size: large;
       color: orange;
     }
+
+    .duration {
+      font-size: large;
+      color: orange;
+    }
+
+    .title {
+      font-size: large;
+      color: salmon;
+    }
+
+    .compduration {
+      font-size: normal;
+      color: blueviolet;
+    }
+
+    ol.compduration {
+      list-style-type:decimal;
+      list-style-position: inside;
+      display: list-item;
+    }
+
+    .task {
+      color: fuchsia;
+    }
+
+    ul.task {
+      list-style-type: circle;
+    }
+
+    .highlight {
+      background-color: green;
+    }
   </style>
   <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
   <script type="text/javascript">
-    var chart;
-    var data;
+    let chart;
+    let data;
+    let rows;
 
     function buildUL(parentElem, value, classProp) {
       const ul = document.createElement('ul');
@@ -22,9 +59,26 @@
       return ul;
     }
 
+    function buildOL(parentElem, value, classProp) {
+      const ul = document.createElement('ol');
+      ul.textContent = value;
+      if (classProp) {
+        ul.classList.add(classProp);
+      }
+      parentElem.appendChild(ul);
+      return ul;
+    }
+
     function buildHR(parentElem) {
       const hr = document.createElement('hr');
       parentElem.appendChild(hr);
+    }
+
+    function buildButton(parentElem, text) {
+      const button = document.createElement('button');
+      button.textContent = text;
+      parentElem.appendChild(button);
+      return button;
     }
     function buildLI(parentElem, value, classProp) {
       const li = document.createElement('li');
@@ -40,21 +94,49 @@
       console.log('update tick', tickData);
       const tickDiv = document.getElementById('tick');
       const tickDurationUL = buildUL(tickDiv, `Ticking cost ${tickData.duration.toFixed(4)}ms:`, 'duration')
-      if (tickData.isMultipleTick) {
-        buildLI(tickDiv, `One task causes multiple tickings, try ngZoneEventCoalescing?`, 'error')
-      }
-      const tickCompLI = buildLI(tickDurationUL, `Render components:`, 'duration')
+      // if (tickData.isMultipleTick) {
+      //   buildLI(tickDiv, `One task causes multiple tickings, try ngZoneEventCoalescing?`, 'error')
+      // }
+      const button = buildButton(tickDurationUL, 'reply');
+      const tickCompLI = buildLI(tickDurationUL, `1.  Render components:`, 'title')
+
+      const components = [];
       tickData.templateDuration.forEach(t => {
-        buildUL(tickCompLI, `Component render ${t.name
-          } cost ${t.duration.toFixed(4)} ms`, 'compduration');
+        const comp = buildOL(tickCompLI, `Render Component ${t.name
+          } cost: ${t.duration.toFixed(4)} ms`, 'compduration');
+        comp.templateData = t;
+        components.push(comp);
       });
-      const tickTriggerLI = buildLI(tickDurationUL, 'Who triggers the CD?', 'duration');
+      button.addEventListener('click', () => {
+        let idx = 0;
+        let id = setInterval(() => {
+          components.forEach(c => c.classList.remove('highlight'));
+          if (idx === components.length) {
+            clearInterval(id);
+            return;
+          }
+          const comp = components[idx++];
+          const templateData = comp.templateData;
+          comp.classList.add('highlight');
+          for (let i = 0; i < rows.length; i ++) {
+            const row = rows[i];
+            const d = row[0];
+            if (row[0].v === templateData.name) {
+              row[0].f = `div style="color:red; font-style:italic">${templateData.name}</div>`;
+            } else {
+              row[0].f = templateData.name;
+            }
+          }
+          chart.draw(data, { 'allowHtml': true });
+        }, 500);
+      });
+      const tickTriggerLI = buildLI(tickDurationUL, 'Who triggers the CD?', 'title');
 
       let isUL = true;
       let elem = tickTriggerLI;
       function buildTickTaskFrameDiv(log) {
-        const tickTaskElem = isUL ? buildUL(elem, log.type ? `task: ${log.type}, ${log.source}, ${log.info}` : '', 'task') :
-          buildLI(elem, log.type ? `task: ${log.type}, ${log.source}, ${log.info}` : '', 'task');
+        const tickTaskElem = isUL ? buildUL(elem, log.type ? `-> task: ${log.type}, ${log.source}, ${log.info}` : '', 'task') :
+          buildLI(elem, log.type ? `-> task: ${log.type}, ${log.source}, ${log.info}` : '', 'task');
         // isUL = !isUL;
         elem = tickTaskElem;
         if (log.children) {
@@ -68,8 +150,27 @@
       buildHR(tickDiv);
     }
     window.updateTaskData = function (d) {
+      const taskDiv = document.getElementById('task');
       const taskData = JSON.parse(d);
       console.log('update task data', taskData);
+      if (!taskData.type) {
+        return;
+      }
+      const taskTitleUL = buildUL(taskDiv, '');
+      const taskTitleLI = buildLI(taskTitleUL, 'Task with children finished.');
+      let elem = taskTitleLI;
+      function buildTaskFrameDiv(log) {
+        const tickTaskElem = buildUL(elem, log.type ? `-> task: ${log.type} ${log.source} cost ${log.duration}ms` : '', 'task');
+        // isUL = !isUL;
+        elem = tickTaskElem;
+        if (log.children) {
+          log.children.forEach(c => {
+            buildTaskFrameDiv(c);
+          });
+        }
+      }
+
+      buildTaskFrameDiv(taskData);
     }
 
     window.updateCompTree = function (dataStr) {
@@ -83,7 +184,7 @@
       console.log('dataStr', dataStr);
       const treeData = JSON.parse(dataStr);
       treeData.parent = null;
-      const rows = [];
+      rows = [];
       buildTree(treeData, rows);
       data.addRows(rows);
       chart.draw(data, { 'allowHtml': true });
