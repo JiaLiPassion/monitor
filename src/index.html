@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
   <title>Monitor</title>
@@ -7,7 +8,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
 </head>
+
 <body>
   <app-root></app-root>
+  <br />
+  <script>
+    function openTrace() {
+      window.tracePopup = window.open('./trace.html', 'popup', 'width=1200,height=768');
+      setTimeout(() => {
+        window.tracePopup.updateCompTree(window.traceCompData);
+      }, 1000);
+    }
+  </script>
+  <a href="./trace.html" target="popup" onclick="openTrace()">Open
+    trace
+    window</a>
 </body>
+
 </html>

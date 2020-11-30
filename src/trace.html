@@ -1,0 +1,134 @@
+<html>
+
+<head>
+  <style>
+    .tick {
+      font-size: large;
+      color: orange;
+    }
+  </style>
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+  <script type="text/javascript">
+    var chart;
+    var data;
+
+    function buildUL(parentElem, value, classProp) {
+      const ul = document.createElement('ul');
+      ul.textContent = value;
+      if (classProp) {
+        ul.classList.add(classProp);
+      }
+      parentElem.appendChild(ul);
+      return ul;
+    }
+
+    function buildHR(parentElem) {
+      const hr = document.createElement('hr');
+      parentElem.appendChild(hr);
+    }
+    function buildLI(parentElem, value, classProp) {
+      const li = document.createElement('li');
+      li.textContent = value;
+      if (classProp) {
+        li.classList.add(classProp);
+      }
+      parentElem.appendChild(li);
+      return li;
+    }
+    window.updateTick = function (d) {
+      const tickData = JSON.parse(d);
+      console.log('update tick', tickData);
+      const tickDiv = document.getElementById('tick');
+      const tickDurationUL = buildUL(tickDiv, `Ticking cost ${tickData.duration.toFixed(4)}ms:`, 'duration')
+      if (tickData.isMultipleTick) {
+        buildLI(tickDiv, `One task causes multiple tickings, try ngZoneEventCoalescing?`, 'error')
+      }
+      const tickCompLI = buildLI(tickDurationUL, `Render components:`, 'duration')
+      tickData.templateDuration.forEach(t => {
+        buildUL(tickCompLI, `Component render ${t.name
+          } cost ${t.duration.toFixed(4)} ms`, 'compduration');
+      });
+      const tickTriggerLI = buildLI(tickDurationUL, 'Who triggers the CD?', 'duration');
+
+      let isUL = true;
+      let elem = tickTriggerLI;
+      function buildTickTaskFrameDiv(log) {
+        const tickTaskElem = isUL ? buildUL(elem, log.type ? `task: ${log.type}, ${log.source}, ${log.info}` : '', 'task') :
+          buildLI(elem, log.type ? `task: ${log.type}, ${log.source}, ${log.info}` : '', 'task');
+        // isUL = !isUL;
+        elem = tickTaskElem;
+        if (log.children) {
+          log.children.forEach(c => {
+            buildTickTaskFrameDiv(c);
+          });
+        }
+      }
+
+      buildTickTaskFrameDiv(tickData.taskFrameLog);
+      buildHR(tickDiv);
+    }
+    window.updateTaskData = function (d) {
+      const taskData = JSON.parse(d);
+      console.log('update task data', taskData);
+    }
+
+    window.updateCompTree = function (dataStr) {
+      function buildTree(node, rows) {
+        rows.push([{ 'v': `${node.text}`, 'f': `${node.text}` }, `${node.parent ? node.parent.text : ''}`, `${node.text}`]);
+        node.children.forEach(c => {
+          c.parent = node;
+          buildTree(c, rows);
+        });
+      }
+      console.log('dataStr', dataStr);
+      const treeData = JSON.parse(dataStr);
+      treeData.parent = null;
+      const rows = [];
+      buildTree(treeData, rows);
+      data.addRows(rows);
+      chart.draw(data, { 'allowHtml': true });
+    }
+    window.onload = function () {
+      // document.getElementById('btn').addEventListener('click', () => {
+      //   const v = data.getValue(0, 0);
+      //   const props = data.getProperties(0, 0);
+      //   data.setCell(0, 0, v, 'Update<div style="color:red; font-style:italic">President</div>');
+      //   chart.draw(data, { 'allowHtml': true });
+      // });
+    }
+    google.charts.load('current', { packages: ["orgchart"] });
+    google.charts.setOnLoadCallback(drawChart);
+
+    function drawChart() {
+      data = new google.visualization.DataTable();
+      data.addColumn('string', 'Name');
+      data.addColumn('string', 'Parent');
+      data.addColumn('string', 'ToolTip');
+
+      // For each orgchart box, provide the name, manager, and tooltip to show.
+      // data.addRows([
+      //   [{ 'v': 'Mike', 'f': 'Mike<div style="color:red; font-style:italic">President</div>' },
+      //     '', 'The President'],
+      //   [{ 'v': 'Jim', 'f': 'Jim<div style="color:red; font-style:italic">Vice President</div>' },
+      //     'Mike', 'VP'],
+      //   ['Alice', 'Mike', ''],
+      //   ['Bob', 'Jim', 'Bob Sponge'],
+      //   ['Carol', 'Bob', '']
+      // ]);
+
+      // Create the chart.
+      chart = new google.visualization.OrgChart(document.getElementById('chart_div'));
+      // Draw the chart, setting the allowHtml option to true for the tooltips.
+      chart.draw(data, { 'allowHtml': true });
+    }
+  </script>
+</head>
+
+<body>
+  <div id="chart_div"></div>
+  <!-- <button id="btn">update</button> -->
+  <div id="tick"></div>
+  <div id="task"></div>
+</body>
+
+</html>

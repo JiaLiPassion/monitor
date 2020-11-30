@@ -1,7 +1,7 @@
 // tslint:disable-next-line:no-reference
 /// <reference path="../node_modules/zone.js/zone.d.ts"/>
 
-import { ApplicationRef, Injector, NgModuleRef } from '@angular/core';
+import { ApplicationRef, NgModuleRef } from '@angular/core';
 import { BehaviorSubject, Subject, Observable, of, combineLatest } from 'rxjs';
 import { mergeMap, switchMap, tap, filter } from 'rxjs/operators';
 
@@ -49,6 +49,14 @@ const topTaskFrame: TaskFrame = {
 };
 
 function printTick(tick: ChangeDetectionInfo) {
+  const tickTraceLog: any = {};
+  tickTraceLog.duration = tick.duration;
+  tickTraceLog.isMultipleTick =
+    currentTaskFrame.changeDetectionInfos.length > 1;
+  tickTraceLog.templateDuration = tick.templateDuration.map((t) => ({
+    name: t.component?.constructor.name || '',
+    duration: t.duration,
+  }));
   console.log(
     `%cTicking cost ${tick.duration.toFixed(4)}ms because of:`,
     'color: orange; font-size: large'
@@ -60,7 +68,7 @@ function printTick(tick: ChangeDetectionInfo) {
     );
   }
   if (tick.taskFrame) {
-    printTaskFrame(tick.taskFrame);
+    printTaskFrame(tick.taskFrame, tickTraceLog);
   }
   tick.templateDuration.forEach((t) => {
     console.log(
@@ -70,15 +78,19 @@ function printTick(tick: ChangeDetectionInfo) {
       'color: orange'
     );
   });
+  if ((window as any).tracePopup) {
+    (window as any).tracePopup.updateTick(JSON.stringify(tickTraceLog));
+  }
 }
 
-function printTaskFrame(taskFrame: TaskFrame) {
+function printTaskFrame(taskFrame: TaskFrame, tickTraceLog: any) {
   if (taskFrame === topTaskFrame) {
     console.log('%czone run on top', 'color: orange');
     return;
   }
   let tf = taskFrame;
   const logs: string[] = [];
+  let tfLog: any = {};
   while (tf) {
     if (tf.task) {
       const callbackName =
@@ -89,9 +101,19 @@ function printTaskFrame(taskFrame: TaskFrame) {
           : null;
       const taskInfo = xhrInfo || callbackName;
       logs.unshift(`task: ${tf.task.type}, ${tf.task.source}, ${taskInfo}`);
+      tfLog.type = tf.task.type;
+      tfLog.source = tf.task.source;
+      tfLog.info = taskInfo;
+    }
+    if (tf.parent) {
+      const parent: any = {};
+      parent.children = [tfLog];
+      tfLog = parent;
     }
     tf = tf.parent;
   }
+  tickTraceLog.taskFrameLog = tfLog;
+
   for (let i = 0; i < logs.length; i++) {
     let prefix = '';
     for (let j = 0; j < i; j++) {
@@ -291,7 +313,12 @@ function endAllTask(taskEnd$: Observable<TaskFrame>): Observable<TaskFrame> {
 }
 
 declare let ng: any;
-function patchComponent(tView, lView, component: any) {
+function patchComponent(tView, lView, component: any, compNode: any) {
+  const node = {
+    text: component.constructor.name,
+    children: [],
+  };
+  compNode.children.push(node);
   const templateFn = tView.template;
   const preOrderCheckHooks = tView.preOrderCheckHooks;
   const contentCheckHooks = tView.contentCheckHooks;
@@ -356,7 +383,7 @@ function patchComponent(tView, lView, component: any) {
     } else {
       cLView = slot[0];
     }
-    patchComponent(cLView[1], cLView, cLView[8]);
+    patchComponent(cLView[1], cLView, cLView[8], node);
   });
 }
 
@@ -378,10 +405,14 @@ function patchEventListener(task: Task) {
   (task.callback as any).unWrap = unWrapAgain;
 }
 
-function printTaskFrameLogAndCleanup(taskFrame: TaskFrame) {
+function printTaskFrameLogAndCleanup(taskFrame: TaskFrame, node: any) {
   if (!taskFrame.taskInfo) {
     return;
   }
+  node.duration = (
+    (taskFrame.taskInfo.performanceChildrenEnd ||
+      taskFrame.taskInfo.performanceEnd) - taskFrame.taskInfo.performanceStart
+  ).toFixed(4);
   if (!taskFrame.task) {
     console.log(
       'cost time: ',
@@ -401,6 +432,11 @@ function printTaskFrameLogAndCleanup(taskFrame: TaskFrame) {
     taskFrame.task.type,
     taskFrame.task.source
   );
+
+  node.type = taskFrame.task.type;
+  node.source = taskFrame.task.source;
+  node.children = [];
+
   console.log(
     'cost time: ',
     (
@@ -410,7 +446,9 @@ function printTaskFrameLogAndCleanup(taskFrame: TaskFrame) {
     'ms'
   );
   taskFrame.children.forEach((c) => {
-    printTaskFrameLogAndCleanup(c);
+    const cNode: any = {};
+    node.children.push(cNode);
+    printTaskFrameLogAndCleanup(c, cNode);
   });
   console.groupEnd();
   // taskFrame.taskInfo = {};
@@ -428,7 +466,13 @@ export function initMonitorZone(
         const taskAllEnd$ = buildTask$(taskFrame);
         return taskAllEnd$.pipe(
           tap((_) => {
-            printTaskFrameLogAndCleanup(taskFrame);
+            const rootNode: any = {};
+            printTaskFrameLogAndCleanup(taskFrame, rootNode);
+            if ((window as any).tracePopup) {
+              (window as any).tracePopup.updateTaskData(
+                JSON.stringify(rootNode)
+              );
+            }
           })
         );
       })
@@ -439,11 +483,27 @@ export function initMonitorZone(
       .then((ngModuleRef) => {
         const appRef = ngModuleRef.injector.get(ApplicationRef);
         const rootComponents = ng && ng.getRootComponents(rootElement);
+        let rootNode;
         rootComponents.forEach((r) => {
           const lView = r['__ngContext__'];
           const tView = lView[1];
-          patchComponent(tView, lView, r);
+          rootNode = {
+            text: r.constructor.name,
+            children: [],
+          };
+          patchComponent(tView, lView, r, rootNode);
         });
+        // send data to trace popup
+        if ((window as any).tracePopup) {
+          (window as any).tracePopup.updateCompTree(JSON.stringify(rootNode));
+        } else {
+          try {
+            (window as any).traceCompData = JSON.stringify(rootNode);
+          } catch (err) {
+            console.error(err);
+          }
+        }
+
         const tick$ = new Subject<any>();
         const tick = appRef.tick;
         ngZone = (appRef as any)._zone;
